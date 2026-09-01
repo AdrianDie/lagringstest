@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Lagringstest</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; padding: 1.5rem; max-width: 32rem; margin: 0 auto; }
+  h1 { font-size: 1.3rem; }
+  button { display: block; width: 100%; padding: 1rem; margin: .5rem 0; font-size: 1rem;
+           border: 1px solid #999; border-radius: 8px; background: #fff; }
+  button:active { background: #eee; }
+  #ut { white-space: pre-wrap; background: #f4f4f4; padding: 1rem; border-radius: 8px;
+        margin-top: 1rem; font-family: ui-monospace, monospace; font-size: .9rem; }
+  .modus { font-weight: 600; margin-top: 1rem; }
+</style>
+
+<h1>Lagringstest — overlever dataene?</h1>
+<p class="modus" id="modus"></p>
+
+<button onclick="skriv()">1 · Skriv testdata</button>
+<button onclick="varig()">2 · Be om varig lagring</button>
+<button onclick="les()">3 · Les testdata</button>
+
+<div id="ut">Klar. Start med knapp 1, så 2. Kom tilbake om noen dager og trykk 3.</div>
+
+<script>
+  const ut = (t) => document.getElementById("ut").textContent = t;
+  const installert = () => matchMedia("(display-mode: standalone)").matches
+    || navigator.standalone === true;
+
+  document.getElementById("modus").textContent =
+    installert() ? "📱 HJEMSKJERM (installert)" : "🌐 SAFARI-FANE";
+
+  function db() {
+    return new Promise((ok, feil) => {
+      const r = indexedDB.open("holdbarhetstest", 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("poster", { keyPath: "id" });
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => feil(r.error);
+    });
+  }
+
+  async function skriv() {
+    try {
+      const d = await db();
+      const tx = d.transaction("poster", "readwrite");
+      // ~2 MB, så vi ligner en ekte kø med målinger og et par feltbilder
+      tx.objectStore("poster").put({
+        id: "test",
+        skrevet: new Date().toISOString(),
+        modus: installert() ? "hjemskjerm" : "fane",
+        fyll: "x".repeat(2 * 1024 * 1024),
+      });
+      tx.oncomplete = () => ut("✅ Skrevet " + new Date().toLocaleString("no")
+        + "\nModus: " + (installert() ? "HJEMSKJERM" : "SAFARI-FANE")
+        + "\n\nGjør knapp 2 nå. Legg så telefonen bort.");
+      tx.onerror = () => ut("❌ Skriving feilet: " + tx.error);
+    } catch (e) { ut("❌ Feil: " + e); }
+  }
+
+  async function les() {
+    try {
+      const d = await db();
+      const r = d.transaction("poster").objectStore("poster").get("test");
+      r.onsuccess = () => {
+        if (!r.result) return ut("❌ BORTE\n\nDataene er slettet. Dette er svaret vi lette "
+          + "etter — noter dato og modus i notatet.");
+        const dager = (Date.now() - Date.parse(r.result.skrevet)) / 86400000;
+        ut("✅ INTAKT\n\nSkrevet:  " + new Date(r.result.skrevet).toLocaleString("no")
+          + "\nAlder:    " + dager.toFixed(1) + " dager"
+          + "\nModus:    " + r.result.modus
+          + "\nStørrelse: " + (r.result.fyll.length / 1024 / 1024).toFixed(1) + " MB");
+      };
+      r.onerror = () => ut("❌ Lesing feilet: " + r.error);
+    } catch (e) { ut("❌ Feil: " + e); }
+  }
+
+  async function varig() {
+    if (!navigator.storage || !navigator.storage.persist) {
+      return ut("⚠️ navigator.storage finnes ikke.\n\nSiden må serveres over HTTPS — "
+        + "over vanlig http er dette API-et utilgjengelig.");
+    }
+    try {
+      const gitt = await navigator.storage.persist();
+      const est = await navigator.storage.estimate();
+      ut((gitt ? "✅" : "⚠️") + " Varig lagring innvilget: " + gitt
+        + "\n\nBrukt:  " + (est.usage / 1024 / 1024).toFixed(1) + " MB"
+        + "\nKvote:  " + (est.quota / 1024 / 1024).toFixed(0) + " MB"
+        + "\n\nNoter svaret. false = dataene er mer utsatt.");
+    } catch (e) { ut("❌ Feil: " + e); }
+  }
+</script>
